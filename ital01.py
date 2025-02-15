@@ -12,6 +12,7 @@ import numpy as np
 #import seaborn as sns
 import matplotlib.pyplot as plt
 import pickle
+from collections import Counter
 #%matplotlib inline
 #sns.set(color_codes=True)
 
@@ -33,23 +34,28 @@ def main():
     #st.sidebar.markdown(":streamlit:")
     st.sidebar.subheader("Que voulez-vous faire?")
     tache = st.sidebar.selectbox(
-        "Tâche à effecturer",
+        "Tâche à effectuer",
         ("Visualisation des données", "Prédiction") # (Open Source) la visualisation nécessite des privilèges
     )
     if tache =="Prédiction":
-        modele=st.sidebar.selectbox("Sélectionnez un modèle",
-                                     ("RandomForest", "SVM", "KNN", "LogisticRegression", "XGBoost")
+        #st.sidebar.subheader("Mode d'entrée des données")
+        
+        mode = st.sidebar.selectbox(
+            "Mode d'entrée des données",
+            ("saisie manuelle", "fichier csv") # (Open Source) la visualisation nécessite des privilèges
         )
-        
-        uploaded_file = st.sidebar.file_uploader("Télécharger vos input", type=['csv'])
-        
         st.sidebar.subheader("Caractéristiques du bovin à prédire")
-        col1, col2 = st.sidebar.columns(2)
-        
-        if uploaded_file is not None:
-            input_df = pd.read_csv(uploaded_file)
+        if mode=="fichier csv":
+            uploaded_file = st.sidebar.file_uploader("Télécharger vos input", type=['csv'])
+            if uploaded_file is not None:
+                input_df = pd.read_csv(uploaded_file)
+            else:
+                st.sidebar.warning("Veuillez télécharger un fichier CSV.")
+                input_df = pd.DataFrame()  # Initialiser input_df pour éviter l'erreur
         else:
+            col1, col2 = st.sidebar.columns(2) 
             
+       
             def user_input():
                 
                 sacrum_ht = col1.number_input(
@@ -121,20 +127,14 @@ def main():
             
             input_df = user_input()
             
+        modele=st.sidebar.selectbox("Sélectionnez un modèle",
+                                     ("prédiction combinée", "RandomForest", "SVM", "KNN", "LogisticRegression", "XGBoost")
+        )    
+        
         baseP=load_data()
         taurins=baseP.drop(columns=['genotype'])
         df=pd.concat([input_df, taurins], axis=0)
-        
-        encode = ['sex', 'hump position']
-        col_mapper = {
-            'Male':1, 'Female':0,
-            'Absent-hump':0, 'Cervicothoracic':1,
-            'Absent-stripe':0, 'Inverse':1, 'Dark':2
-            }
-        def col_encode(val):
-            return col_mapper[val]
-        
-        
+          
         def encodage(df, columns):
             code = {
                 'Male': 1, 'Female': 0,
@@ -194,9 +194,32 @@ def main():
                     with open("xgbp-default_saved.pkl", "rb") as f:
                         model = pickle.load(f)
             return model
-        
-        saved_model=load_predictor(modele)
-        prediction=saved_model.predict(df)
+        if modele == 'prédiction combinée':
+            def classify_candidate(features):
+                svm_model=load_predictor('SVM')
+                rf_model=load_predictor('RandomForest')
+                lr_model=load_predictor('LogisticRegression')
+                knn_model=load_predictor('KNN')
+                xgb_model=load_predictor('XGBoost')
+                
+                xgb_pred=xgb_model.predict(features)
+                if xgb_pred == 1:
+                    return 1
+                else:
+                    preds = [
+                        xgb_pred,
+                        svm_model.predict(features),
+                        rf_model.predict(features),
+                        lr_model.predict(features),
+                        knn_model.predict(features)
+                    ]
+                    majority_vote = Counter(preds).most_common(1)[0][0]
+                    return 1 if majority_vote == 1 else 0
+                
+            prediction = classify_candidate(df)
+        else:
+            saved_model=load_predictor(modele)
+            prediction=saved_model.predict(df)
         #prediction_proba=saved_model.predict_proba(df)
         
         
