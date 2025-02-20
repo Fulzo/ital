@@ -5,6 +5,7 @@ Created on Fri Feb 10 11:12:10 2023
 @author: HP
 """
 
+import tensorflow as tf
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -13,6 +14,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pickle
 from collections import Counter
+from PIL import Image, ImageOps
+import cv2
+import os
 #%matplotlib inline
 #sns.set(color_codes=True)
 
@@ -23,7 +27,7 @@ def main():
         return data_clean  
     st.markdown('''## :blue-background[:blue[ITaL 0.1:]]  :blue[I]dentificateur de :blue[Ta]urin :blue[L]obi''')
     st.markdown(''' Version 0.1 :flag-bf:''')
-    st.markdown("#### *Cette application permet de déterminer si un bovin est un :red[Taurin Lobi] pur à partir de ses données morphologiques*"
+    st.markdown("##### *Cette application permet de déterminer si un bovin est un :red[Taurin Lobi] pur à partir d'une image ou de ses mesures morphologiques*"
              )
     st.markdown(":grey-background[Auteur:] **Bembamba Fulbert**")
     
@@ -35,9 +39,63 @@ def main():
     st.sidebar.subheader("Que voulez-vous faire?")
     tache = st.sidebar.selectbox(
         "Tâche à effectuer",
-        ("Visualisation des données", "Prédiction") # (Open Source) la visualisation nécessite des privilèges
+        ("Prédiction par l'image", "Prédiction par les mesures morpho") # (Open Source) la visualisation nécessite des privilèges
     )
-    if tache =="Prédiction":
+    if tache == "Prédiction par l'image":
+        file = st.sidebar.file_uploader("Chargez une image de bovin à prédire", type=["jpg", "png"])
+        
+        if file == None:
+            st.sidebar.warning("Veuillez télécharger une image de bovin.")
+        else:
+            image = Image.open(file)
+            st.image(image,                      
+                     #use_column_width=True
+                     width=400
+                     )
+            
+            def import_img(image_data):
+                size = (256, 256)
+                image = ImageOps.fit(image_data, size)  # 🔧 Suppression de `Image.ANTIALIAS` (obsolète)
+                image = np.array(image)  # Conversion en NumPy array
+
+                if image.shape[-1] == 4:  # 🔧 Certains PNG ont un canal alpha (RGBA)
+                    image = image[:, :, :3]
+
+                img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)  # OpenCV attend un format BGR
+                img_reshape = img[np.newaxis, ...] / 255.0  # Normalisation
+                return img_reshape
+            
+            img = import_img(image)
+            
+            from tensorflow.keras.models import load_model
+            dir_savedModel = 'C:\\Users\\DELL\\Documents\\THESE\\Manuscript these\\Codes Manuscrit\\Scripts_manuscrit'
+            with st.spinner('Chargement du modèle de prédiction de vue'):
+                view_predictor = load_model(os.path.join(dir_savedModel, 'taurinView_classif.h5'))
+            view_pred = view_predictor.predict(img)
+            score = tf.nn.softmax(view_pred[0])
+            view_classes=['tête', 'arrière', 'profil']
+            view = view_classes[np.argmax(score)]
+            
+            def load_predictor(vue):
+                match(vue):
+                    case 'tête':
+                        with st.spinner('Chargement du modèle de prédiction de tête'):
+                            model=load_model(os.path.join(dir_savedModel, 'taurinCNN_head.h5'))
+                    case 'arrière':
+                        with st.spinner('Chargement du modèle de prédiction arrière'):
+                            model=load_model(os.path.join(dir_savedModel, 'taurinCNN_tail.h5'))   
+                    case 'profil':
+                        with st.spinner('Chargement du modèle de prédiction de profil'):
+                            model=load_model(os.path.join(dir_savedModel, 'taurinCNN_side.h5'))
+                return model
+            
+            predictor = load_predictor(view)
+            predictions = predictor.predict(img)
+            prediction = "Lobi" if predictions > 0.5 else "NoLobi"
+            if st.sidebar.button("PREDIRE"):
+                st.sidebar.write(f" Cette image vue de {view} est un **{prediction}**")
+            
+    if tache =="Prédiction par les mesures morpho":
         #st.sidebar.subheader("Mode d'entrée des données")
         
         mode = st.sidebar.selectbox(
